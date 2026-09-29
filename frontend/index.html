@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>STAPT</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ["IBM Plex Sans", "ui-sans-serif", "system-ui", "sans-serif"],
+            mono: ["IBM Plex Mono", "ui-monospace", "Menlo", "monospace"],
+          },
+        },
+      },
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css" />
+  <style>
+    html, body, #app { height: 100%; }
+    body { background: #14120a; color: #e4e4e7; }
+    .xterm, .xterm-viewport { height: 100%; }
+    .CodeMirror { height: 100%; font-size: 13px; font-family: "IBM Plex Mono", ui-monospace, monospace; background: #0c0c0e; }
+    .nav-btn.active { background: rgba(234, 179, 8, 0.25); color: #fef9c3; border: 1px solid rgba(250, 204, 21, 0.45); }
+    #term { height: 100%; }
+  </style>
+</head>
+<body class="h-full overflow-hidden">
+  <div id="app" class="flex h-full">
+    <aside class="w-52 shrink-0 border-r border-zinc-800 bg-zinc-950 flex flex-col">
+      <div class="px-4 py-4 border-b border-zinc-800">
+        <div class="text-sm font-semibold tracking-wide text-yellow-400">STAPT</div>
+        <div class="text-[11px] text-zinc-500 mt-0.5">ssh · files · editor</div>
+      </div>
+      <div class="px-3 py-3 space-y-2 border-b border-zinc-800">
+        <label class="block text-[10px] uppercase tracking-wider text-zinc-500">Server</label>
+        <select id="sel-server" class="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-sm"></select>
+        <label class="block text-[10px] uppercase tracking-wider text-zinc-500">Root path</label>
+        <select id="sel-project" class="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-sm"></select>
+      </div>
+      <nav class="p-2 space-y-0.5 text-sm">
+        <button data-view="servers" class="nav-btn active w-full text-left px-3 py-2 rounded hover:bg-zinc-900">Servers</button>
+        <button data-view="terminal" class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-900">Terminal</button>
+        <button data-view="files" class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-900">Files</button>
+        <button data-view="settings" class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-900">Settings</button>
+      </nav>
+      <div class="mt-auto px-4 py-3 text-[11px] text-zinc-600 border-t border-zinc-800" id="app-label">Native desktop</div>
+    </aside>
+
+    <main class="flex-1 min-w-0 flex flex-col bg-zinc-950">
+      <section id="view-servers" class="flex-1 overflow-auto p-6"></section>
+      <section id="view-terminal" class="flex-1 hidden flex-col min-h-0">
+        <div class="flex items-center gap-2 px-4 py-2 border-b border-zinc-800 text-sm">
+          <span id="term-title" class="text-zinc-400 truncate">Select a root path</span>
+          <button id="term-connect" class="ml-auto px-3 py-1 rounded bg-yellow-500 hover:bg-yellow-400 text-zinc-950 font-medium text-sm">Connect</button>
+          <button id="term-disconnect" class="px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-sm hidden">Disconnect</button>
+        </div>
+        <div id="term" class="flex-1 min-h-0 p-2"></div>
+      </section>
+      <section id="view-files" class="flex-1 hidden flex-col min-h-0"></section>
+      <section id="view-settings" class="flex-1 overflow-auto p-6 hidden"></section>
+    </main>
+  </div>
+
+  <div id="toast" class="hidden fixed bottom-4 right-4 max-w-sm px-3 py-2 rounded text-sm bg-zinc-800 border border-zinc-700 shadow-lg z-50"></div>
+  <div id="modal" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+    <div class="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-lg p-4">
+      <p id="modal-text" class="text-sm text-zinc-200 whitespace-pre-wrap break-all"></p>
+      <input id="modal-input" class="hidden mt-3 w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-sm" />
+      <div class="mt-4 flex justify-end gap-2">
+        <button id="modal-cancel" class="px-3 py-1.5 text-sm rounded bg-zinc-800">Cancel</button>
+        <button id="modal-ok" class="px-3 py-1.5 text-sm rounded bg-yellow-500 text-zinc-950 font-medium">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/css/css.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/htmlmixed/htmlmixed.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/yaml/yaml.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/sql/sql.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/markdown/markdown.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/meta.min.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

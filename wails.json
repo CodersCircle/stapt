@@ -1,0 +1,18 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "STAPT",
+  "outputfilename": "STAPT",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "",
+  "author": {
+    "name": "CodersCircle"
+  },
+  "info": {
+    "companyName": "CodersCircle",
+    "productName": "STAPT",
+    "productVersion": "1.0.0",
+    "comments": "SSH terminal, SFTP files, lightweight editor"
+  }
+}

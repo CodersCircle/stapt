@@ -1,0 +1,12 @@
+build/bin/
+dist/
+*.dmg
+._*
+.DS_Store
+*.exe
+*.app
+*.dmg
+*.deb
+*.rpm
+*.AppImage
+.DS_Store
