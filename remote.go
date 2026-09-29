@@ -23,9 +23,11 @@ import (
 const (
 	sshDialTimeout  = 15 * time.Second
 	sftpOpTimeout   = 45 * time.Second
-	connIdleTimeout = 5 * time.Minute
+	connIdleTimeout = 2 * time.Hour
 	maxEditBytes    = 2 << 20
-	maxUploadBytes  = 32 << 20
+	maxUploadBytes = 200 << 20
+	uploadWorkers  = 8
+
 )
 
 type HostKeyNeededError struct {
@@ -621,6 +623,39 @@ func (m *Manager) Upload(serverID int64, root, dir, name string, src io.Reader, 
 	})
 }
 
+func (m *Manager) EnsureDirRaw(serverID int64, dir string) error {
+	dir = normalizeRemote(dir)
+	if dir == "" || dir == "/" {
+		return errors.New("invalid directory")
+	}
+	cli, err := m.sftp(serverID)
+	if err != nil {
+		return err
+	}
+	parts := strings.Split(strings.TrimPrefix(dir, "/"), "/")
+	cur := ""
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		cur += "/" + part
+		st, e := cli.Stat(cur)
+		if e == nil {
+			if !st.IsDir() {
+				return errors.New("path is not a directory")
+			}
+			continue
+		}
+		if e := cli.Mkdir(cur); e != nil {
+			if st2, e2 := cli.Stat(cur); e2 == nil && st2.IsDir() {
+				continue
+			}
+			return e
+		}
+	}
+	return nil
+}
+
 func resizePTY(sess *ssh.Session, cols, rows int) error {
 	if cols < 20 {
 		cols = 80
@@ -669,6 +704,192 @@ func (m *Manager) StatDir(serverID int64, remotePath string) error {
 		}
 		return nil
 	})
+}
+
+func (m *Manager) ExistsDir(serverID int64, remotePath string) bool {
+	remotePath = normalizeRemote(remotePath)
+	if remotePath == "" {
+		return false
+	}
+	cli, err := m.sftp(serverID)
+	if err != nil {
+		return false
+	}
+	st, err := cli.Stat(remotePath)
+	return err == nil && st.IsDir()
+}
+
+func (m *Manager) ReadDirNames(serverID int64, remotePath string) ([]os.FileInfo, error) {
+	cli, err := m.sftp(serverID)
+	if err != nil {
+		return nil, err
+	}
+	return cli.ReadDir(normalizeRemote(remotePath))
+}
+
+func (m *Manager) HomeDir(serverID int64, username string) string {
+	cli, err := m.sftp(serverID)
+	if err != nil {
+		return ""
+	}
+	if wd, err := cli.Getwd(); err == nil {
+		wd = normalizeRemote(wd)
+		if wd != "" && wd != "/" {
+			return wd
+		}
+	}
+	if rp, err := cli.RealPath("."); err == nil {
+		rp = normalizeRemote(rp)
+		if rp != "" && rp != "/" {
+			return rp
+		}
+	}
+	user := strings.TrimSpace(username)
+	if user != "" {
+		cand := "/home/" + user
+		if st, err := cli.Stat(cand); err == nil && st.IsDir() {
+			return cand
+		}
+	}
+	return ""
+}
+
+func (m *Manager) FileExists(serverID int64, remotePath string) bool {
+	cli, err := m.sftp(serverID)
+	if err != nil {
+		return false
+	}
+	_, err = cli.Stat(normalizeRemote(remotePath))
+	return err == nil
+}
+
+func (m *Manager) NewSFTP(serverID int64) (*sftp.Client, func(), error) {
+	client, err := m.client(serverID)
+	if err != nil {
+		return nil, nil, err
+	}
+	cli, err := sftp.NewClient(client, sftp.UseConcurrentWrites(true), sftp.UseFstat(false))
+	if err != nil {
+		return nil, nil, err
+	}
+	return cli, func() { _ = cli.Close() }, nil
+}
+
+func uploadOn(cli *sftp.Client, root, rel string, src io.Reader) error {
+	rel = strings.TrimPrefix(filepath.ToSlash(rel), "/")
+	if rel == "" || strings.Contains(rel, "..") {
+		return errors.New("invalid path")
+	}
+	full, err := resolveRemote(root, rel)
+	if err != nil {
+		return err
+	}
+	full, err = confinedPath(cli, root, full)
+	if err != nil {
+		return err
+	}
+	f, e := cli.OpenFile(full, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
+	if e != nil {
+		return e
+	}
+	n, e := io.Copy(f, io.LimitReader(src, maxUploadBytes+1))
+	_ = f.Close()
+	if e != nil {
+		_ = cli.Remove(full)
+		return e
+	}
+	if n > maxUploadBytes {
+		_ = cli.Remove(full)
+		return errors.New("file too large")
+	}
+	return nil
+}
+
+func (m *Manager) MkdirP(serverID int64, root, dir string) error {
+	full, err := resolveRemote(root, dir)
+	if err != nil {
+		return err
+	}
+	cli, err := m.sftp(serverID)
+	if err != nil {
+		return err
+	}
+	parts := strings.Split(strings.TrimPrefix(full, "/"), "/")
+	cur := ""
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		cur += "/" + part
+		if err := insideRoot(root, cur); err != nil {
+			continue
+		}
+		st, e := cli.Stat(cur)
+		if e == nil {
+			if !st.IsDir() {
+				return errors.New("path is not a directory")
+			}
+			continue
+		}
+		if e := cli.Mkdir(cur); e != nil {
+			if st2, e2 := cli.Stat(cur); e2 == nil && st2.IsDir() {
+				continue
+			}
+			return e
+		}
+	}
+	return nil
+}
+
+func (m *Manager) UploadRel(serverID int64, root, rel string, src io.Reader) error {
+	rel = strings.TrimPrefix(filepath.ToSlash(rel), "/")
+	if rel == "" || strings.Contains(rel, "..") {
+		return errors.New("invalid path")
+	}
+	dir := path.Dir(rel)
+	name := path.Base(rel)
+	if dir != "." && dir != "" {
+		parent := path.Join(root, dir)
+		if err := m.MkdirP(serverID, root, parent); err != nil {
+			return err
+		}
+		return m.Upload(serverID, root, parent, name, src, maxUploadBytes)
+	}
+	return m.Upload(serverID, root, root, name, src, maxUploadBytes)
+}
+
+func (m *Manager) Exec(serverID int64, workDir, cmdline string) (string, error) {
+	if strings.TrimSpace(cmdline) == "" {
+		return "", errors.New("command is required")
+	}
+	client, err := m.client(serverID)
+	if err != nil {
+		return "", err
+	}
+	sess, err := client.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer sess.Close()
+	cmd := cmdline
+	if workDir != "" {
+		cmd = "cd " + shellQuote(workDir) + " && " + cmdline
+	}
+	var buf bytes.Buffer
+	sess.Stdout = &buf
+	sess.Stderr = &buf
+	err = sess.Run(cmd)
+	out := buf.String()
+	if len(out) > 64<<10 {
+		out = out[:64<<10] + "\n…truncated"
+	}
+	if err != nil && out == "" {
+		return "", err
+	}
+	if err != nil {
+		return strings.TrimSpace(out), err
+	}
+	return strings.TrimSpace(out), nil
 }
 
 func hostKeyB64(pub []byte) string {

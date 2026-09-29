@@ -28,8 +28,46 @@
     body { background: #14120a; color: #e4e4e7; }
     .xterm, .xterm-viewport { height: 100%; }
     .CodeMirror { height: 100%; font-size: 13px; font-family: "IBM Plex Mono", ui-monospace, monospace; background: #0c0c0e; }
-    .nav-btn.active { background: rgba(234, 179, 8, 0.25); color: #fef9c3; border: 1px solid rgba(250, 204, 21, 0.45); }
+    .nav-btn.active { background: rgba(250, 204, 21, 0.22); color: #fef9c3; border: 1px solid rgba(250, 204, 21, 0.5); }
+    .method-btn.active { background: #facc15; color: #14120a; }
+    @keyframes card-shimmer {
+      0% { background-position: -420px 0; }
+      100% { background-position: 420px 0; }
+    }
+    .skel {
+      background: linear-gradient(90deg, #27272a 0%, #52525b 45%, #27272a 100%);
+      background-size: 840px 100%;
+      animation: card-shimmer 1.15s infinite linear;
+    }
+    #upload-bar { height: 3px; background: #facc15; width: 0; }
     #term { height: 100%; }
+    @keyframes fly-up {
+      0% { transform: translateY(48px); opacity: 0; }
+      25% { opacity: 1; }
+      100% { transform: translateY(-90px); opacity: 0; }
+    }
+    .upload-arrows .arr {
+      position: absolute;
+      bottom: 24px;
+      color: #facc15;
+      font-size: 22px;
+      animation: fly-up 1.05s ease-in infinite;
+    }
+    .upload-arrows .arr:nth-child(1) { left: 18%; animation-delay: 0s; }
+    .upload-arrows .arr:nth-child(2) { left: 38%; animation-delay: 0.18s; }
+    .upload-arrows .arr:nth-child(3) { left: 58%; animation-delay: 0.36s; }
+    .upload-arrows .arr:nth-child(4) { left: 78%; animation-delay: 0.54s; }
+    html.light body { background: #f7f4ea; color: #18181b; }
+    html.light .bg-zinc-950 { background-color: #f7f4ea !important; }
+    html.light .bg-zinc-900 { background-color: #fffdf6 !important; }
+    html.light .bg-zinc-800 { background-color: #ece6d4 !important; }
+    html.light .border-zinc-800, html.light .border-zinc-700 { border-color: #e4ddc8 !important; }
+    html.light .text-zinc-200 { color: #27272a !important; }
+    html.light .text-zinc-400, html.light .text-zinc-500 { color: #52525b !important; }
+    html.light .text-zinc-600 { color: #71717a !important; }
+    html.light .text-red-400 { color: #b91c1c !important; }
+    html.light aside { background-color: #fffbeb !important; }
+    html.light .skel { background: linear-gradient(90deg, #ece6d4 0%, #f5f0e0 45%, #ece6d4 100%); background-size: 840px 100%; }
   </style>
 </head>
 <body class="h-full overflow-hidden">
@@ -40,43 +78,66 @@
         <div class="text-[11px] text-zinc-500 mt-0.5">ssh · files · editor</div>
       </div>
       <div class="px-3 py-3 space-y-2 border-b border-zinc-800">
-        <label class="block text-[10px] uppercase tracking-wider text-zinc-500">Server</label>
+        <label class="block text-[10px] uppercase tracking-wider text-zinc-500" data-i18n="label.server">Server</label>
         <select id="sel-server" class="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-sm"></select>
-        <label class="block text-[10px] uppercase tracking-wider text-zinc-500">Root path</label>
+        <label class="block text-[10px] uppercase tracking-wider text-zinc-500" data-i18n="label.project">Project</label>
         <select id="sel-project" class="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-sm"></select>
       </div>
       <nav class="p-2 space-y-0.5 text-sm">
-        <button data-view="servers" class="nav-btn active w-full text-left px-3 py-2 rounded hover:bg-zinc-900">Servers</button>
-        <button data-view="terminal" class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-900">Terminal</button>
-        <button data-view="files" class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-900">Files</button>
-        <button data-view="settings" class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-900">Settings</button>
+        <button data-view="servers" class="nav-btn active w-full text-left px-3 py-2 rounded hover:bg-zinc-900" data-i18n="nav.servers">Servers</button>
+        <button data-view="terminal" class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-900" data-i18n="nav.terminal">Terminal</button>
+        <button data-view="files" class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-900" data-i18n="nav.files">Files</button>
+        <button data-view="commands" class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-900" data-i18n="nav.commands">Commands</button>
+        <button data-view="notes" class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-900" data-i18n="nav.notes">Notes</button>
+        <button data-view="settings" class="nav-btn w-full text-left px-3 py-2 rounded hover:bg-zinc-900" data-i18n="nav.settings">Settings</button>
       </nav>
       <div class="mt-auto px-4 py-3 text-[11px] text-zinc-600 border-t border-zinc-800" id="app-label">Native desktop</div>
     </aside>
 
     <main class="flex-1 min-w-0 flex flex-col bg-zinc-950">
-      <section id="view-servers" class="flex-1 overflow-auto p-6"></section>
+      <div id="upload-wrap" class="hidden h-1 bg-zinc-900 shrink-0"><div id="upload-bar"></div></div>
+      <section id="view-servers" class="flex-1 overflow-auto p-6">Loading…</section>
       <section id="view-terminal" class="flex-1 hidden flex-col min-h-0">
         <div class="flex items-center gap-2 px-4 py-2 border-b border-zinc-800 text-sm">
-          <span id="term-title" class="text-zinc-400 truncate">Select a root path</span>
-          <button id="term-connect" class="ml-auto px-3 py-1 rounded bg-yellow-500 hover:bg-yellow-400 text-zinc-950 font-medium text-sm">Connect</button>
+          <span id="term-title" class="text-zinc-400 truncate">Open a project first</span>
+          <button id="term-clear" class="ml-auto px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-sm">Clear</button>
+          <button id="term-connect" class="px-3 py-1 rounded bg-yellow-400 hover:bg-yellow-300 text-zinc-950 font-medium text-sm">Connect</button>
+          <button id="term-reconnect" class="px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-sm hidden">Reconnect</button>
           <button id="term-disconnect" class="px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-sm hidden">Disconnect</button>
         </div>
         <div id="term" class="flex-1 min-h-0 p-2"></div>
       </section>
       <section id="view-files" class="flex-1 hidden flex-col min-h-0"></section>
+      <section id="view-commands" class="flex-1 overflow-auto p-6 hidden"></section>
+      <section id="view-notes" class="flex-1 overflow-auto p-6 hidden"></section>
       <section id="view-settings" class="flex-1 overflow-auto p-6 hidden"></section>
     </main>
   </div>
 
   <div id="toast" class="hidden fixed bottom-4 right-4 max-w-sm px-3 py-2 rounded text-sm bg-zinc-800 border border-zinc-700 shadow-lg z-50"></div>
+  <div id="upload-panel" class="hidden fixed inset-0 z-40 bg-black/70 flex items-center justify-center p-4">
+    <div class="w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-lg p-4 relative overflow-hidden">
+      <div id="upload-arrows" class="hidden upload-arrows pointer-events-none absolute inset-0">
+        <span class="arr">↑</span><span class="arr">↑</span><span class="arr">↑</span><span class="arr">↑</span>
+      </div>
+      <h2 id="upload-title" class="text-sm font-medium text-yellow-400 relative">Upload</h2>
+      <p id="upload-dest" class="mt-1 text-[11px] font-mono text-zinc-500 break-all relative"></p>
+      <p id="upload-counts" class="mt-2 text-sm text-zinc-200 relative"></p>
+      <div id="upload-list" class="mt-3 max-h-56 overflow-auto border border-zinc-800 rounded text-[12px] font-mono text-zinc-400 relative"></div>
+      <p id="upload-status" class="mt-3 text-xs text-yellow-400 hidden relative"></p>
+      <div id="upload-actions" class="mt-4 flex justify-end gap-2 relative">
+        <button id="upload-cancel" class="px-3 py-1.5 text-sm rounded bg-zinc-800" data-i18n="cancel">Cancel</button>
+        <button id="upload-go" class="px-3 py-1.5 text-sm rounded bg-yellow-400 text-zinc-950 font-medium" data-i18n="files.upload_now">Upload</button>
+      </div>
+    </div>
+  </div>
   <div id="modal" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
     <div class="w-full max-w-sm bg-zinc-900 border border-zinc-800 rounded-lg p-4">
       <p id="modal-text" class="text-sm text-zinc-200 whitespace-pre-wrap break-all"></p>
       <input id="modal-input" class="hidden mt-3 w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-sm" />
       <div class="mt-4 flex justify-end gap-2">
         <button id="modal-cancel" class="px-3 py-1.5 text-sm rounded bg-zinc-800">Cancel</button>
-        <button id="modal-ok" class="px-3 py-1.5 text-sm rounded bg-yellow-500 text-zinc-950 font-medium">OK</button>
+        <button id="modal-ok" class="px-3 py-1.5 text-sm rounded bg-yellow-400 text-zinc-950 font-medium">OK</button>
       </div>
     </div>
   </div>
@@ -93,6 +154,20 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/markdown/markdown.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/meta.min.js"></script>
+  <script>
+    window.addEventListener("error", function (e) {
+      var el = document.getElementById("view-servers");
+      if (el && !window.__staptPainted) {
+        el.textContent = "UI error: " + ((e && e.message) || e);
+      }
+    });
+    window.addEventListener("unhandledrejection", function (e) {
+      var el = document.getElementById("view-servers");
+      if (el && !window.__staptPainted) {
+        el.textContent = "UI error: " + ((e.reason && e.reason.message) || e.reason || "unknown");
+      }
+    });
+  </script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

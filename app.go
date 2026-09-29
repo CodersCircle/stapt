@@ -7,17 +7,19 @@ import (
 	"io"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type App struct {
-	ctx   context.Context
-	store *Store
-	mgr   *Manager
-	term  *termHub
+	ctx     context.Context
+	store   *Store
+	mgr     *Manager
+	term    *termHub
+	stageMu sync.Mutex
+	staged  *stagedUpload
 }
 
 func NewApp(store *Store, mgr *Manager) *App {
@@ -218,6 +220,9 @@ func (a *App) TestConnection(in TestInput) TestResult {
 	if saveID > 0 && len(hk) > 0 {
 		_ = a.store.SaveHostKey(saveID, hk)
 	}
+	if saveID > 0 {
+		a.store.TouchLastConnected(saveID)
+	}
 	var auditID *int64
 	if saveID > 0 {
 		auditID = &saveID
@@ -234,6 +239,7 @@ func (a *App) ListProjects(serverID int64) ([]Project, error) {
 	if serverID <= 0 {
 		return nil, errors.New("serverId is required")
 	}
+	a.store.PruneJunkProjects(serverID)
 	return a.store.ListProjects(serverID)
 }
 
@@ -241,18 +247,29 @@ type ProjectInput struct {
 	ServerID   int64  `json:"serverId"`
 	Name       string `json:"name"`
 	RemotePath string `json:"remotePath"`
+	Kind       string `json:"kind"`
+	Status     string `json:"status"`
 }
 
 func (a *App) CreateProject(in ProjectInput) (int64, error) {
 	if err := a.mgr.StatDir(in.ServerID, in.RemotePath); err != nil {
 		return 0, err
 	}
-	id, err := a.store.CreateProject(in.ServerID, in.Name, in.RemotePath)
+	kind := in.Kind
+	if kind == "" {
+		kind = "project"
+	}
+	status := in.Status
+	if status == "" {
+		status = "ready"
+	}
+	tech := detectTech(a.mgr, in.ServerID, absRemoteDir(in.RemotePath))
+	id, err := a.store.CreateProjectFull(in.ServerID, in.Name, in.RemotePath, kind, status, tech)
 	if err != nil {
 		return 0, err
 	}
 	sid := in.ServerID
-	a.store.AddAudit(&sid, "project.create", in.Name+" "+absRemoteDir(in.RemotePath))
+	a.store.AddAudit(&sid, "project.create", in.Name)
 	return id, nil
 }
 
@@ -264,13 +281,20 @@ func (a *App) UpdateProject(id int64, in ProjectInput) error {
 	if err != nil {
 		return err
 	}
+	if p.RemotePath == "" {
+		return errors.New("project root is missing")
+	}
 	if err := a.mgr.StatDir(p.ServerID, in.RemotePath); err != nil {
 		return err
 	}
-	if err := a.store.UpdateProject(id, in.Name, in.RemotePath); err != nil {
+	status := in.Status
+	if status == "" {
+		status = "ready"
+	}
+	if err := a.store.UpdateProjectMeta(id, in.Name, in.RemotePath, in.Kind, status); err != nil {
 		return err
 	}
-	a.store.AddAudit(&p.ServerID, "project.update", in.Name+" "+absRemoteDir(in.RemotePath))
+	a.store.AddAudit(&p.ServerID, "project.update", in.Name)
 	return nil
 }
 
@@ -299,6 +323,9 @@ func (a *App) ListFiles(projectID int64, remotePath string) (FileListResult, err
 	p, err := a.store.GetProject(projectID)
 	if err != nil {
 		return out, err
+	}
+	if strings.TrimSpace(remotePath) == "" {
+		remotePath = p.ActivePath()
 	}
 	list, err := a.mgr.List(p.ServerID, p.RemotePath, remotePath)
 	if err != nil {
@@ -448,33 +475,6 @@ func (a *App) DownloadFile(projectID int64, remotePath string) error {
 	return nil
 }
 
-func (a *App) UploadFile(projectID int64, dir string) error {
-	p, err := a.store.GetProject(projectID)
-	if err != nil {
-		return err
-	}
-	local, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Upload file",
-	})
-	if err != nil {
-		return err
-	}
-	if local == "" {
-		return nil
-	}
-	f, err := os.Open(local)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	name := path.Base(filepath.ToSlash(local))
-	if err := a.mgr.Upload(p.ServerID, p.RemotePath, dir, name, f, maxUploadBytes); err != nil {
-		return err
-	}
-	a.store.AddAudit(&p.ServerID, "file.upload", path.Join(dir, name))
-	return nil
-}
-
 func (a *App) ListAudit() ([]Audit, error) {
 	return a.store.ListAudit()
 }
@@ -495,11 +495,11 @@ func (a *App) StartTerminal(projectID int64, cols, rows int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	sess, stdin, stdout, err := startPTY(client, proj.RemotePath, cols, rows)
+	sess, stdin, stdout, err := startPTY(client, proj.ActivePath(), cols, rows)
 	if err != nil {
 		return "", err
 	}
-	a.store.AddAudit(&proj.ServerID, "terminal.start", proj.Name+" "+proj.RemotePath)
+	a.store.AddAudit(&proj.ServerID, "terminal.start", proj.Name+" "+proj.ActivePath())
 	id := a.term.Register(sess, stdin)
 	go a.term.pump(a.ctx, id, stdout)
 	return id, nil
@@ -525,4 +525,149 @@ type TerminalOutputEvent struct {
 
 func encodeTermChunk(b []byte) string {
 	return base64.StdEncoding.EncodeToString(b)
+}
+
+func (a *App) ParseSSHCommand(raw string) (ParsedSSH, error) {
+	return parseSSHCommand(raw)
+}
+
+func (a *App) DiscoverProjects(serverID int64) ([]Project, error) {
+	if serverID <= 0 {
+		return nil, errors.New("invalid id")
+	}
+	sv, _, err := a.store.GetServer(serverID)
+	if err != nil {
+		return nil, err
+	}
+	found, err := a.mgr.Discover(serverID, sv.Username)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range found {
+		if isJunkDomainName(d.Name) {
+			continue
+		}
+		_, _ = a.store.UpsertDiscovered(serverID, d.Name, d.Path, d.Kind, d.Status, d.Tech)
+	}
+	a.store.PruneJunkProjects(serverID)
+	a.store.AddAudit(&serverID, "discover", "scan complete")
+	return a.store.ListProjects(serverID)
+}
+
+type ConnectDiscoverResult struct {
+	Test     TestResult `json:"test"`
+	Projects []Project  `json:"projects"`
+}
+
+func (a *App) ConnectAndDiscover(in TestInput) ConnectDiscoverResult {
+	res := a.TestConnection(in)
+	out := ConnectDiscoverResult{Test: res}
+	if !res.OK {
+		return out
+	}
+	sid := in.ServerID
+	if sid > 0 {
+		list, err := a.DiscoverProjects(sid)
+		if err != nil {
+			out.Test.Error = err.Error()
+			out.Test.OK = false
+			return out
+		}
+		out.Projects = list
+	}
+	return out
+}
+
+func (a *App) ListQuickCommands(projectID int64) ([]QuickCommand, error) {
+	p, err := a.store.GetProject(projectID)
+	if err != nil {
+		return nil, err
+	}
+	tech := p.Tech
+	if tech == "" {
+		tech = detectTech(a.mgr, p.ServerID, p.ActivePath())
+		_, _ = a.store.UpsertDiscovered(p.ServerID, p.Name, p.RemotePath, p.Kind, p.Status, tech)
+	}
+	return commandsForTech(tech), nil
+}
+
+func (a *App) RunQuickCommand(projectID int64, key string, confirm bool) CommandResult {
+	p, err := a.store.GetProject(projectID)
+	if err != nil {
+		return CommandResult{Error: err.Error()}
+	}
+	cmd, destructive, err := commandLine(key)
+	if err != nil {
+		return CommandResult{Error: err.Error()}
+	}
+	if destructive && !confirm {
+		return CommandResult{Error: "confirm required"}
+	}
+	out, err := a.mgr.Exec(p.ServerID, p.ActivePath(), cmd)
+	if err != nil {
+		msg := err.Error()
+		if looksSecret(msg) {
+			msg = "command failed"
+		}
+		return CommandResult{Output: out, Error: msg}
+	}
+	a.store.AddAudit(&p.ServerID, "quick."+key, p.Name)
+	return CommandResult{OK: true, Output: out}
+}
+
+func (a *App) ListNotes(projectID int64) ([]Note, error) {
+	if projectID <= 0 {
+		return a.store.ListAllNotes()
+	}
+	return a.store.ListNotes(projectID)
+}
+
+func (a *App) ListAllNotes() ([]Note, error) {
+	return a.store.ListAllNotes()
+}
+
+type NoteInput struct {
+	ProjectID int64  `json:"projectId"`
+	Category  string `json:"category"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
+}
+
+func (a *App) CreateNote(in NoteInput) (int64, error) {
+	id, err := a.store.CreateNote(in.ProjectID, in.Category, in.Title, in.Content)
+	if err != nil {
+		return 0, err
+	}
+	if in.ProjectID > 0 {
+		if p, e := a.store.GetProject(in.ProjectID); e == nil {
+			a.store.AddAudit(&p.ServerID, "note.create", in.Title)
+		}
+	}
+	return id, nil
+}
+
+func (a *App) UpdateNote(id int64, in NoteInput) error {
+	if err := a.store.UpdateNote(id, in.Category, in.Title, in.Content); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *App) DeleteNote(id int64, confirm bool) error {
+	if !confirm {
+		return errors.New("confirm required")
+	}
+	n, err := a.store.GetNote(id)
+	if err != nil {
+		return err
+	}
+	if err := a.store.DeleteNote(id); err != nil {
+		return err
+	}
+	if n.ProjectID > 0 {
+		if p, e := a.store.GetProject(n.ProjectID); e == nil {
+			a.store.AddAudit(&p.ServerID, "note.delete", n.Title)
+		}
+	}
+	return nil
 }
