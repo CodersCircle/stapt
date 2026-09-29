@@ -4,7 +4,7 @@ Native desktop **SSH terminal**, **SFTP file manager**, and **lightweight code e
 
 Built with Go, Wails, HTML, JavaScript, and Tailwind CSS. Opens as a real app window — not a browser tab.
 
-![STAPT](build/appicon.png)
+![STAPT](docs/stapt-logo.png)
 
 ---
 
