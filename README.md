@@ -1,6 +1,6 @@
 # STAPT
 
-Native desktop **SSH terminal**, **SFTP file manager**, and **lightweight code editor**.
+Native desktop **SSH terminal**, **SFTP file manager**, and **lightweight editor**.
 
 Built with Go, Wails, HTML, JavaScript, and Tailwind CSS. Opens as a real app window — not a browser tab.
 
@@ -8,29 +8,29 @@ Built with Go, Wails, HTML, JavaScript, and Tailwind CSS. Opens as a real app wi
 
 ---
 
-## Who are you?
+## Install (macOS / Windows / Linux)
 
-### I want the app — download & install
+**[Download installers](https://github.com/CodersCircle/stapt/releases/latest)** · step-by-step in **[INSTALL.md](INSTALL.md)**
 
-**[Download latest installers (macOS / Windows / Linux)](https://github.com/CodersCircle/stapt/releases/latest)**
+| OS | File | What to do |
+|----|------|------------|
+| **macOS** Apple Silicon | [STAPT-macOS-arm64.dmg](https://github.com/CodersCircle/stapt/releases/latest/download/STAPT-macOS-arm64.dmg) | Open DMG → double-click **Install STAPT.command** |
+| **macOS** Intel | [STAPT-macOS-amd64.dmg](https://github.com/CodersCircle/stapt/releases/latest/download/STAPT-macOS-amd64.dmg) | Same |
+| **Windows** 64-bit | [STAPT-Windows-x64-setup.exe](https://github.com/CodersCircle/stapt/releases/latest/download/STAPT-Windows-x64-setup.exe) | Run the setup → Start Menu → **STAPT** |
+| **Linux** Debian/Ubuntu | [STAPT-Linux-amd64.deb](https://github.com/CodersCircle/stapt/releases/latest/download/STAPT-Linux-amd64.deb) | `sudo dpkg -i STAPT-Linux-amd64.deb` |
+| **Linux** any | [STAPT-Linux-x64.tar.gz](https://github.com/CodersCircle/stapt/releases/latest/download/STAPT-Linux-x64.tar.gz) | Extract → `bash install.sh` |
 
-| Platform | Direct download |
-|----------|-----------------|
-| macOS (Apple Silicon) | [STAPT-macOS-arm64.dmg](https://github.com/CodersCircle/stapt/releases/latest/download/STAPT-macOS-arm64.dmg) |
-| macOS (Intel) | [STAPT-macOS-amd64.dmg](https://github.com/CodersCircle/stapt/releases/latest/download/STAPT-macOS-amd64.dmg) |
-| Windows 64-bit | [STAPT-Windows-x64.exe](https://github.com/CodersCircle/stapt/releases/latest/download/STAPT-Windows-x64.exe) |
-| Linux 64-bit | [STAPT-Linux-x64.tar.gz](https://github.com/CodersCircle/stapt/releases/latest/download/STAPT-Linux-x64.tar.gz) |
+One-line install:
 
-Step-by-step: **[INSTALL.md](INSTALL.md)**
-
-### I want the source code — build myself
-
+**macOS / Linux**
 ```bash
-git clone git@github.com:CodersCircle/stapt.git
-cd stapt
+curl -fsSL https://raw.githubusercontent.com/CodersCircle/stapt/main/scripts/install.sh | bash
 ```
 
-Then follow **[INSTALL.md](INSTALL.md)** for your OS.
+**Windows** (PowerShell)
+```powershell
+irm https://raw.githubusercontent.com/CodersCircle/stapt/main/scripts/install.ps1 | iex
+```
 
 ---
 
@@ -46,12 +46,15 @@ Credentials are encrypted in `~/.stapt`. Secrets are never sent back to the UI a
 
 ---
 
-## Quick build (developers)
+## Build from source (developers)
 
-**macOS / Linux:** `./build.sh`  
-**Windows:** `build.bat`  
+```bash
+git clone https://github.com/CodersCircle/stapt.git
+cd stapt
+```
 
-Output: `build/bin/STAPT.app` | `STAPT.exe` | `STAPT`
+**macOS / Linux:** `./build.sh` then `./install-mac.sh` or `./install-linux.sh`  
+**Windows:** `build.bat` then `powershell -ExecutionPolicy Bypass -File install-windows.ps1`
 
 ---
 

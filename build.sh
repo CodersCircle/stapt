@@ -36,5 +36,5 @@ fi
 
 echo ""
 echo "Built: build/bin/STAPT.app"
-echo "Install (once): ./install-mac.sh"
+echo "Install (once): ./install-mac.sh   (copies into Applications)"
 echo "Package DMG: ./scripts/package-mac-dmg.sh"

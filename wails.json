@@ -12,7 +12,8 @@
   "info": {
     "companyName": "CodersCircle",
     "productName": "STAPT",
-    "productVersion": "1.0.0",
+    "productVersion": "1.0.1",
+    "copyright": "Copyright © CodersCircle",
     "comments": "SSH terminal, SFTP files, lightweight editor"
   }
 }

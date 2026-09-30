@@ -1,0 +1,18 @@
+INSTALL STAPT ON THIS MAC
+=========================
+
+Do not double-click the yellow STAPT app icon in this window.
+macOS will block it because the file came from the internet.
+
+1) Double-click  “Install STAPT.command”
+2) If macOS shows “cannot be opened”, click Done, then:
+     System Settings → Privacy & Security → scroll down → Open Anyway
+   Then double-click  “Install STAPT.command”  again.
+
+OR paste this in Terminal (always works):
+
+  bash "/Volumes/STAPT/Install STAPT.command"
+
+That copies STAPT into Applications, removes the Gatekeeper lock, and opens it.
+
+After that, start STAPT from Launchpad or Spotlight (Cmd+Space → STAPT).

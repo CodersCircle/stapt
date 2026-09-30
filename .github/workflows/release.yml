@@ -19,18 +19,19 @@ jobs:
             goos: darwin
             goarch: arm64
             asset_dmg: STAPT-macOS-arm64.dmg
-          - os: macos-13
+          - os: macos-15-intel
             goos: darwin
             goarch: amd64
             asset_dmg: STAPT-macOS-amd64.dmg
           - os: windows-latest
             goos: windows
             goarch: amd64
-            asset_exe: STAPT-Windows-x64.exe
+            asset_setup: STAPT-Windows-x64-setup.exe
           - os: ubuntu-22.04
             goos: linux
             goarch: amd64
             asset_tgz: STAPT-Linux-x64.tar.gz
+            asset_deb: STAPT-Linux-amd64.deb
 
     runs-on: ${{ matrix.os }}
 
@@ -45,9 +46,14 @@ jobs:
         if: runner.os == 'macOS'
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
-      - name: Install Wails (Windows)
+      - name: Install NSIS and Wails (Windows)
         if: runner.os == 'Windows'
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+        shell: pwsh
+        run: |
+          choco install nsis -y
+          echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "C:\Program Files\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
       - name: Install Wails (Linux)
         if: runner.os == 'Linux'
@@ -56,7 +62,8 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
           go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
-      - name: Build
+      - name: Build (macOS / Linux)
+        if: runner.os != 'Windows'
         shell: bash
         env:
           GOOS: ${{ matrix.goos }}
@@ -65,29 +72,53 @@ jobs:
           export PATH="$PATH:$(go env GOPATH)/bin"
           wails build -clean -platform ${{ matrix.goos }}/${{ matrix.goarch }}
 
-      - name: Package macOS DMG
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          export PATH="$PATH:$(go env GOPATH)/bin:/c/Program Files (x86)/NSIS:/c/Program Files/NSIS"
+          wails build -clean -nsis -installscope user -webview2 embed -platform windows/amd64
+
+      - name: Package macOS installer DMG
         if: matrix.asset_dmg != ''
         run: |
-          mkdir -p dist
-          hdiutil create -volname STAPT -srcfolder build/bin/STAPT.app -ov -format UDZO "dist/${{ matrix.asset_dmg }}"
+          chmod +x scripts/package-mac-dmg.sh scripts/dmg/Install-STAPT.command
+          ./scripts/package-mac-dmg.sh "dist/${{ matrix.asset_dmg }}"
 
-      - name: Package Windows installer
-        if: matrix.asset_exe != ''
+      - name: Package Windows setup
+        if: matrix.asset_setup != ''
         shell: bash
         run: |
           mkdir -p dist
-          cp build/bin/STAPT.exe "dist/${{ matrix.asset_exe }}"
+          setup="$(ls build/bin/*installer.exe 2>/dev/null | head -n 1 || true)"
+          if [[ -n "$setup" ]]; then
+            cp "$setup" "dist/${{ matrix.asset_setup }}"
+          else
+            echo "NSIS installer missing; uploading portable exe as setup fallback"
+            cp build/bin/STAPT.exe "dist/${{ matrix.asset_setup }}"
+          fi
 
-      - name: Package Linux tarball
+      - name: Package Linux installers
         if: matrix.asset_tgz != ''
         run: |
-          mkdir -p dist
-          tar -czf "dist/${{ matrix.asset_tgz }}" -C build/bin STAPT
+          chmod +x scripts/package-linux.sh
+          ./scripts/package-linux.sh
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: dist/*
+          body: |
+            Native STAPT installers for macOS, Windows, and Linux.
+
+            **macOS:** open the DMG → double-click **Install STAPT.command** (not the yellow app icon). If macOS blocks it: System Settings → Privacy & Security → Open Anyway.
+
+            **Windows:** run **STAPT-Windows-x64-setup.exe**. If SmartScreen appears: More info → Run anyway. Then open STAPT from the Start Menu.
+
+            **Linux:** install `STAPT-Linux-amd64.deb`, or extract the tar.gz and run `install.sh`.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
